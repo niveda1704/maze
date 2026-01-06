@@ -7,7 +7,7 @@
 ###  Double Click 
 1. Navigate to the folder where you saved `maze.html`.
 2. **Double-click** the file.
-3. It will open automatically in your default web browser (Chrome, Edge, Firefox, Safari, etc.).
+3. It will open automatically in your default web browser .
 
 ##  How to Play
 
@@ -26,10 +26,10 @@
 *   **Smooth Physics**: Fluid movement system; the orb glides towards your input.
 *   **Neon Aesthetic**: Glowing visuals, particle trails, and dynamic lighting effects.
 *   **Infinite Levels**: Levels 1-2 are handcrafted tutorials. Level 3+ are procedurally generated and get progressively harder.
-*   **Cross-Platform**: Works with Mouse on Desktop and Touch on Mobile/Tablet.
+*   **Cross-Platform**: Works with Mouse on Desktop and Touch on Mobilet.
 
 ##  Technology
 Built with **Vanilla HTML, CSS, and JavaScript**.
 *   **Rendering**: HTML5 Canvas for high-performance graphics.
-*   **Audio**: Web Audio API for synthesized sound effects 
+*   **Audio**: Web Audio API for  sound effects 
 *   **Single File**: The entire game is contained within `maze.html` for easy sharing.
