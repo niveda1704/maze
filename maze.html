@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neon Flow Maze</title>
+    <style>
+        :root {
+            --bg-color: #050505;
+            --text-color: #e0e0e0;
+            --accent-color: #00f3ff;
+            --highlight-color: #ffffff;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Segoe UI', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+            touch-action: none;
+            /* Prevent scroll on mobile */
+        }
+
+        #ui-header {
+            position: absolute;
+            top: 20px;
+            text-align: center;
+            pointer-events: none;
+            z-index: 10;
+            text-shadow: 0 0 10px rgba(0, 0, 0, 0.8);
+        }
+
+        h1 {
+            font-size: 2rem;
+            color: var(--accent-color);
+            text-shadow: 0 0 20px var(--accent-color);
+            margin-bottom: 5px;
+        }
+
+        .stats {
+            font-size: 1rem;
+            opacity: 0.9;
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+        }
+
+        canvas {
+            box-shadow: 0 0 50px rgba(0, 243, 255, 0.1);
+            border-radius: 4px;
+            cursor: none;
+            /* Hide default cursor during game */
+        }
+
+        #cursor-guide {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            pointer-events: none;
+            transform: translate(-50%, -50%);
+            z-index: 20;
+            display: none;
+        }
+
+        /* Instructions overlay */
+        #start-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 50;
+            transition: opacity 0.5s;
+        }
+
+        #start-overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .btn {
+            background: var(--accent-color);
+            color: #000;
+            border: none;
+            padding: 15px 30px;
+            font-size: 1.2rem;
+            border-radius: 30px;
+            cursor: pointer;
+            font-weight: bold;
+            box-shadow: 0 0 20px var(--accent-color);
+            margin-top: 20px;
+            transition: transform 0.2s;
+        }
+
+        .btn:hover {
+            transform: scale(1.05);
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="ui-header">
+        <h1>NEON FLOW</h1>
+        <div class="stats">
+            <span>Level <b id="level-disp">1</b></span>
+            <span>Time <b id="time-disp">00:00</b></span>
+        </div>
+    </div>
+
+    <div id="start-overlay">
+        <h1 style="font-size: 3rem;">NEON FLOW</h1>
+        <p style="margin-bottom: 30px; color: #ccc;">Mouse & Touch Enabled</p>
+        <div style="text-align: center; max-width: 400px; line-height: 1.5;">
+            <p>Click & Hold to guide the <span style="color:#00f3ff">Orb</span>.</p>
+            <p>Avoid the walls.</p>
+            <p>Reach the <span style="color:#ff0055">Zone</span>.</p>
+        </div>
+        <button class="btn" onclick="startGame()">START GAME</button>
+    </div>
+
+    <!-- Custom Cursor for style -->
+    <div id="cursor-guide"></div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        // --- AUDIO SYSTEM ---
+        const AudioSys = {
+            ctx: null,
+            init: function () {
+                window.AudioContext = window.AudioContext || window.webkitAudioContext;
+                this.ctx = new AudioContext();
+            },
+            playTone: function (freq, type, dur, vol = 0.1) {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + dur);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + dur);
+            }
+        };
+
+        // --- GAME CONSTANTS ---
+        const CELL_SIZE = 40; // Larger for smooth movement visually
+        const WALL_THICKNESS = 40;
+        const PLAYER_RADIUS = 12;
+        const SPEED = 5;
+
+        // --- GAME STATE ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        let level = 1;
+        let rows, cols;
+        let grid = []; // 1=Wall, 0=Path
+        let startPos = { r: 0, c: 0 };
+        let exitPos = { r: 0, c: 0 };
+
+        // Player state (Pixels)
+        let player = { x: 0, y: 0, vx: 0, vy: 0 };
+        // Mouse/Input state
+        let input = { x: 0, y: 0, isDown: false, active: false };
+
+        let gameState = 'MENU'; // MENU, PLAYING, TRANSITION
+        let startTime = 0;
+        let particles = [];
+
+        // Predefined simple levels for tutorial feel
+        const PREDEFINED = [
+            null,
+            // L1 Simple S curve
+            ["1111111", "1S00001", "1111101", "1000001", "1011111", "10000E1", "1111111"],
+            // L2 Warning
+            ["111111111", "1S0001001", "111101011", "100000001", "101111101", "100000101", "111011101", "1E0010001", "111111111"]
+        ];
+
+        // --- INITIALIZATION ---
+        function startGame() {
+            document.getElementById('start-overlay').classList.add('hidden');
+            AudioSys.init();
+            level = 1;
+            loadLevel(level);
+            gameState = 'PLAYING';
+            loop();
+        }
+
+        function resizeCanvas() {
+            // Calculated based on grid
+            // But we want to fit screen
+            // We will scale the canvas via CSS if needed, but lets try to keep 1:1 for logic first
+            // or regenerate maze to fit screen aspect ratio?
+            // For now, fixed cell size logic.
+        }
+
+        // --- LEVEL LOGIC ---
+        function loadLevel(lvl) {
+            // Generate Grid
+            if (lvl < 3 && PREDEFINED[lvl]) {
+                grid = parseGrid(PREDEFINED[lvl]);
+                rows = grid.length;
+                cols = grid[0].length;
+            } else {
+                // Auto generate
+                let size = 10 + Math.floor((lvl - 3) * 2);
+                size = Math.min(size, 25); // Cap size
+                rows = size;
+                cols = size;
+                if (rows % 2 === 0) rows++; // Odd for algorithm
+                if (cols % 2 === 0) cols++;
+                grid = generateMaze(rows, cols);
+            }
+
+            // Canvas Size
+            canvas.width = cols * CELL_SIZE;
+            canvas.height = rows * CELL_SIZE;
+
+            // Set Player to Center of Start Cell
+            player.x = (startPos.c * CELL_SIZE) + (CELL_SIZE / 2);
+            player.y = (startPos.r * CELL_SIZE) + (CELL_SIZE / 2);
+
+            // Stats
+            document.getElementById('level-disp').textContent = lvl;
+            startTime = Date.now();
+
+            // Particles reset
+            particles = [];
+        }
+
+        function parseGrid(arr) {
+            let g = [];
+            for (let r = 0; r < arr.length; r++) {
+                let row = [];
+                for (let c = 0; c < arr[r].length; c++) {
+                    let char = arr[r][c];
+                    if (char === 'S') { startPos = { r, c }; row.push(0); }
+                    else if (char === 'E') { exitPos = { r, c }; row.push(0); }
+                    else if (char === '1') { row.push(1); }
+                    else row.push(0);
+                }
+                g.push(row);
+            }
+            return g;
+        }
+
+        function generateMaze(r, c) {
+            let g = Array(r).fill().map(() => Array(c).fill(1));
+            // Recursive Backtracker
+            let stack = [{ r: 1, c: 1 }];
+            g[1][1] = 0;
+            startPos = { r: 1, c: 1 };
+
+            while (stack.length) {
+                let cur = stack[stack.length - 1];
+                let nData = [];
+                let dirs = [[0, -2], [0, 2], [-2, 0], [2, 0]];
+
+                for (let d of dirs) {
+                    let nr = cur.r + d[0], nc = cur.c + d[1];
+                    if (nr > 0 && nr < r - 1 && nc > 0 && nc < c - 1 && g[nr][nc] === 1) {
+                        nData.push({ nr, nc, dr: d[0] / 2, dc: d[1] / 2 });
+                    }
+                }
+
+                if (nData.length) {
+                    let next = nData[Math.floor(Math.random() * nData.length)];
+                    g[cur.r + next.dr][cur.c + next.dc] = 0;
+                    g[next.nr][next.nc] = 0;
+                    stack.push({ r: next.nr, c: next.nc });
+                } else {
+                    stack.pop();
+                }
+            }
+
+            // Find Exit (furthest bottom right empty)
+            let found = false;
+            for (let rr = r - 2; rr > 0 && !found; rr--) {
+                for (let cc = c - 2; cc > 0 && !found; cc--) {
+                    if (g[rr][cc] === 0) {
+                        exitPos = { r: rr, c: cc };
+                        found = true;
+                    }
+                }
+            }
+            return g;
+        }
+
+        // --- INPUT HANDLING ---
+        window.addEventListener('mousedown', e => {
+            input.isDown = true;
+            input.active = true;
+            updateCtxPos(e);
+        });
+        window.addEventListener('mousemove', e => {
+            updateCtxPos(e);
+        });
+        window.addEventListener('mouseup', () => {
+            input.isDown = false;
+        });
+
+        // Touch support
+        window.addEventListener('touchstart', e => {
+            input.isDown = true;
+            input.active = true;
+            updateCtxPos(e.touches[0]);
+            e.preventDefault();
+        }, { passive: false });
+        window.addEventListener('touchmove', e => {
+            if (input.isDown) updateCtxPos(e.touches[0]);
+            e.preventDefault();
+        }, { passive: false });
+        window.addEventListener('touchend', () => {
+            input.isDown = false;
+        });
+
+        function updateCtxPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            input.x = e.clientX - rect.left;
+            input.y = e.clientY - rect.top;
+        }
+
+        // --- PHYSICS & COLLISION ---
+        function update() {
+            // Update Time
+            let delta = Math.floor((Date.now() - startTime) / 1000);
+            let s = delta % 60;
+            let m = Math.floor(delta / 60);
+            document.getElementById('time-disp').innerText = `${m}:${s < 10 ? '0' + s : s}`;
+
+            if (gameState !== 'PLAYING') return;
+
+            // Movement
+            if (input.isDown) {
+                // Vector to mouse
+                let dx = input.x - player.x;
+                let dy = input.y - player.y;
+                let dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist > 5) { // Deadzone
+                    let moveDist = Math.min(dist, SPEED); // Cap speed
+                    let angle = Math.atan2(dy, dx);
+
+                    let targetX = player.x + Math.cos(angle) * moveDist;
+                    let targetY = player.y + Math.sin(angle) * moveDist;
+
+                    // Collision Check
+                    // We check circle against nearby tiles
+                    // Simplification: Check bounding box of new position against wall tiles
+                    if (!checkWallCollision(targetX, player.y)) {
+                        player.x = targetX;
+                    }
+                    if (!checkWallCollision(player.x, targetY)) {
+                        player.y = targetY;
+                    }
+
+                    // Trail particles
+                    if (Math.random() > 0.5) {
+                        particles.push({
+                            x: player.x, y: player.y,
+                            vx: (Math.random() - 0.5), vy: (Math.random() - 0.5),
+                            life: 1.0, color: '#00f3ff'
+                        });
+                    }
+                }
+            }
+
+            // Check Exit
+            let dExit = Math.sqrt(Math.pow(player.x - ((exitPos.c + 0.5) * CELL_SIZE), 2) + Math.pow(player.y - ((exitPos.r + 0.5) * CELL_SIZE), 2));
+            if (dExit < CELL_SIZE / 2) {
+                levelComplete();
+            }
+
+            // Particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life -= 0.05;
+                if (p.life <= 0) particles.splice(i, 1);
+            }
+        }
+
+        function checkWallCollision(px, py) {
+            // Check the 4 bounding box corners + 4 midpoints of the circle (approx)
+            // Or simpler: check the cell the edge of the physics circle is in
+
+            // Points to check: Top, Bottom, Left, Right edges
+            // We convert these pixel coordinates to Grid coordinates
+            let points = [
+                { c: Math.floor((px - PLAYER_RADIUS) / CELL_SIZE), r: Math.floor(py / CELL_SIZE) }, // Left
+                { c: Math.floor((px + PLAYER_RADIUS) / CELL_SIZE), r: Math.floor(py / CELL_SIZE) }, // Right
+                { c: Math.floor(px / CELL_SIZE), r: Math.floor((py - PLAYER_RADIUS) / CELL_SIZE) }, // Top
+                { c: Math.floor(px / CELL_SIZE), r: Math.floor((py + PLAYER_RADIUS) / CELL_SIZE) }, // Bottom
+                // Diagonals for better corner handling?
+                { c: Math.floor((px - PLAYER_RADIUS * 0.7) / CELL_SIZE), r: Math.floor((py - PLAYER_RADIUS * 0.7) / CELL_SIZE) },
+                { c: Math.floor((px + PLAYER_RADIUS * 0.7) / CELL_SIZE), r: Math.floor((py - PLAYER_RADIUS * 0.7) / CELL_SIZE) },
+                { c: Math.floor((px - PLAYER_RADIUS * 0.7) / CELL_SIZE), r: Math.floor((py + PLAYER_RADIUS * 0.7) / CELL_SIZE) },
+                { c: Math.floor((px + PLAYER_RADIUS * 0.7) / CELL_SIZE), r: Math.floor((py + PLAYER_RADIUS * 0.7) / CELL_SIZE) }
+            ];
+
+            for (let p of points) {
+                if (p.r < 0 || p.r >= rows || p.c < 0 || p.c >= cols) return true; // Bounds
+                if (grid[p.r][p.c] === 1) return true; // Wall
+            }
+            return false;
+        }
+
+        function levelComplete() {
+            gameState = 'TRANSITION';
+            AudioSys.playTone(600, 'sine', 0.1);
+            AudioSys.playTone(800, 'square', 0.2);
+
+            // Explosion
+            for (let i = 0; i < 30; i++) {
+                particles.push({
+                    x: player.x, y: player.y,
+                    vx: (Math.random() - 0.5) * 10, vy: (Math.random() - 0.5) * 10,
+                    life: 2.0, color: '#ff0055'
+                });
+            }
+
+            setTimeout(() => {
+                level++;
+                loadLevel(level);
+                gameState = 'PLAYING';
+            }, 1500);
+        }
+
+        // --- RENDER ---
+        function draw() {
+            // Clear
+            ctx.fillStyle = '#050505'; // BG Color
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw Maze Walls
+            // We draw paths as "Light" or Walls as "Solid"
+            // Let's draw the floor (0) as dark path, walls (1) as solid blocks for now, but style them without borders
+
+            // Draw Walls
+            ctx.fillStyle = '#111'; // Wall color
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    if (grid[r][c] === 1) {
+                        ctx.fillRect(c * CELL_SIZE, r * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+
+                        // Aesthetic: Add stylized inner border/bevel for walls
+                        ctx.fillStyle = '#161616';
+                        ctx.fillRect(c * CELL_SIZE + 2, r * CELL_SIZE + 2, CELL_SIZE - 4, CELL_SIZE - 4);
+                        ctx.fillStyle = '#111';
+                    } else {
+                        // Path - Optional faint guide
+                        // ctx.fillStyle = '#080808';
+                        // ctx.fillRect(c*CELL_SIZE, r*CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                    }
+                }
+            }
+
+            // Draw Start & Exit
+            const cx = CELL_SIZE / 2;
+            ctx.beginPath();
+            ctx.arc((startPos.c * CELL_SIZE) + cx, (startPos.r * CELL_SIZE) + cx, 10, 0, Math.PI * 2);
+            ctx.fillStyle = '#00ff88';
+            ctx.shadowBlur = 20; ctx.shadowColor = '#00ff88';
+            ctx.fill(); ctx.shadowBlur = 0;
+
+            ctx.beginPath();
+            ctx.arc((exitPos.c * CELL_SIZE) + cx, (exitPos.r * CELL_SIZE) + cx, 12 + Math.sin(Date.now() / 200) * 2, 0, Math.PI * 2);
+            ctx.fillStyle = '#ff0055';
+            ctx.shadowBlur = 30; ctx.shadowColor = '#ff0055';
+            ctx.fill(); ctx.shadowBlur = 0;
+
+            // Draw Particles
+            for (let p of particles) {
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalAlpha = 1;
+            }
+
+            // Draw Player
+            ctx.fillStyle = '#00f3ff';
+            ctx.shadowBlur = 20; ctx.shadowColor = '#00f3ff';
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, PLAYER_RADIUS, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+
+            // Draw Input Guide (Line from player to mouse if dragging)
+            if (input.isDown && gameState === 'PLAYING') {
+                ctx.strokeStyle = 'rgba(0, 243, 255, 0.3)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(player.x, player.y);
+                ctx.lineTo(input.x, input.y);
+                ctx.stroke();
+            }
+        }
+
+        function loop() {
+            update();
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        // Handle window resize? Not dynamic yet, fixed to grid.
+
+    </script>
+</body>
+
+</html>
