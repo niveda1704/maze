@@ -1,11 +1,11 @@
 # Neon Flow Maze
 
-**Neon Flow Maze** is a browser-based skill game where you guide a glowing neon orb through intricate mazes using smooth mouse or touch controls.
+**Neon Flow Maze** is a browser-based skill game where you guide a glowing neon orb through intricate mazes using smooth mouse/ touch controls.
 
 ## How to Run
 
 ###  Double Click 
-1. Navigate to the folder where you saved `maze.html`.
+1. Navigate to the folder where it is saved `maze.html`.
 2. **Double-click** the file.
 3. It will open automatically in your default web browser .
 
